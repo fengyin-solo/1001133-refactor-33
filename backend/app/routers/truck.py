@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.schemas import ActionResult, EntryPayload, PageResult
 from app.services.truck import TruckService
@@ -14,6 +15,13 @@ service = TruckService()
 
 LIST_FIELDS = ["调度单号", "集卡牌号", "司机姓名", "作业任务", "派车时间", "返回时间", "所属车队", "调度状态"]
 STATUSES = ["待派车", "作业中", "已返回", "已取消"]
+
+
+class TruckActionPayload(BaseModel):
+    """动作报文：兼容页面既有顶层 action 与统一 values.action 两种写法。"""
+
+    action: str | None = None
+    values: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("", response_model=PageResult[dict])
@@ -28,6 +36,13 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出集卡调度清单：与列表同口径，返回当前全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "truck", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -49,17 +64,10 @@ def create_entry(payload: EntryPayload) -> ActionResult:
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
-def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条集卡执行确认派车、确认返回、取消调度；不允许的动作会被拦下并说明原因。"""
-    action = str(payload.values.get("action") or "").strip()
+def run_action(entry_id: int, payload: TruckActionPayload) -> ActionResult:
+    """对单条集卡执行确认派车、确认返回、取消调度；三处动作共用服务层同一份判断。"""
+    action = str(payload.action or payload.values.get("action") or "").strip()
     entry, message = service.run_action(entry_id, action)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出集卡调度清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "truck", "total": total, "items": items}

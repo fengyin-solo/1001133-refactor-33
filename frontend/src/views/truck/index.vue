@@ -57,6 +57,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条集卡调度记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -78,6 +79,7 @@ const stats = [{"label": "待派车任务", "value": 0}, {"label": "作业中集
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const noticeMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
@@ -96,6 +98,7 @@ function openCreate() {
 
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  noticeMessage.value = ''
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
@@ -103,6 +106,13 @@ async function runAction(action: string, row: Row) {
     })
     if (!response.ok) {
       throw new Error('集卡调度动作未生效，请稍后重试')
+    }
+    // 后端放行与否都走 200 + ok 标记；拦下时展示同一份判断给出的说明。
+    const payload = await response.json()
+    if (payload?.ok === false) {
+      errorMessage.value = payload.message || '集卡调度动作未生效，请稍后重试'
+    } else if (payload?.message) {
+      noticeMessage.value = payload.message
     }
     await reload()
   } catch (error) {
@@ -112,6 +122,7 @@ async function runAction(action: string, row: Row) {
 
 async function reload() {
   errorMessage.value = ''
+  noticeMessage.value = ''
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
   try {
     const response = await request(`${ENDPOINT}?${query}`)
